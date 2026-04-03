@@ -13,8 +13,7 @@
 # ============================================================
 
 import os
-import re
-import json
+from enum import Enum
 from google import genai
 from google.genai import types
 from fastapi import FastAPI, HTTPException
@@ -66,15 +65,7 @@ Rebid mechanic:
 You will receive the game state as JSON, including your own serial number.
 Use your serial number to inform your bids and challenges.
 
-You may respond in simple shorthand OR as a JSON object.
-
-Simple shorthand (preferred for clarity):
-  3x5          — bid: 3 of digit 5
-  challenge    — challenge the current bid
-  rebid 4x5    — rebid: 4 of digit 5 (only when can_rebid=true)
-  accept       — accept the challenge (only when can_rebid=true)
-
-Full JSON (also accepted):
+Respond as a JSON object:
   { "action_type": "bid",       "quantity": 3, "digit": 5, "reasoning": "..." }
   { "action_type": "challenge", "reasoning": "..." }
   { "action_type": "rebid",     "quantity": 4, "digit": 5, "reasoning": "..." }
@@ -106,8 +97,14 @@ class GameState(BaseModel):
     total_digits: int                # total digits in play (8 × number of active players)
     can_rebid: bool = False          # True when you were just challenged and may rebid or accept
 
+class ActionType(str, Enum):
+    bid = "bid"
+    challenge = "challenge"
+    rebid = "rebid"
+    accept = "accept"
+
 class Action(BaseModel):
-    action_type: str                 # "bid", "challenge", "rebid", or "accept"
+    action_type: ActionType
     quantity: Optional[int] = None   # required for "bid" and "rebid"
     digit: Optional[int] = None      # required for "bid" and "rebid" (0–9, 0 is highest)
     reasoning: Optional[str] = None
@@ -122,54 +119,6 @@ class AgentInfo(BaseModel):
     version: str
 
 # ============================================================
-# RESPONSE PARSING — parses both shorthand and JSON responses
-# ============================================================
-
-def parse_action(text: str) -> Action:
-    """Parse the model's response as an Action.
-
-    Accepts shorthand strings like "3x5", "challenge", "rebid 4x5", "accept",
-    as well as full JSON objects (with optional markdown code fences).
-    """
-    text = text.strip()
-
-    # Strip markdown code fences
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else text
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-
-    # Try JSON first
-    try:
-        data = json.loads(text)
-        return Action(**data)
-    except (json.JSONDecodeError, Exception):
-        pass
-
-    # Try simple shorthand formats
-    lower = text.lower().strip()
-
-    if lower in ("challenge", "c"):
-        return Action(action_type="challenge")
-
-    if lower in ("accept", "a"):
-        return Action(action_type="accept")
-
-    # "NxD" or "N x D" — bid with quantity N, digit D
-    m = re.match(r'^(\d+)\s*[x×]\s*(\d+)$', lower)
-    if m:
-        return Action(action_type="bid", quantity=int(m.group(1)), digit=int(m.group(2)))
-
-    # "rebid NxD" or "rebid N x D"
-    m = re.match(r'^rebid\s+(\d+)\s*[x×]\s*(\d+)$', lower)
-    if m:
-        return Action(action_type="rebid", quantity=int(m.group(1)), digit=int(m.group(2)))
-
-    raise ValueError(f"Could not parse model response as Action.\nResponse was: {text}")
-
-# ============================================================
 # AGENT LOGIC — edit this for advanced control of the agent loop
 # ============================================================
 
@@ -180,16 +129,18 @@ def decide_action(state: GameState) -> Action:
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             max_output_tokens=CONFIG["max_output_tokens"],
+            response_mime_type="application/json",
+            response_schema=Action,
         ),
     )
 
-    return parse_action(response.text)
+    return Action.model_validate_json(response.text)
 
 # ============================================================
 # API — do not edit
 # ============================================================
 
-app = FastAPI()
+app = FastAPI(redirect_slashes=False)
 
 @app.post("/action", response_model=ActionResponse)
 async def action(state: GameState):
