@@ -15,7 +15,8 @@
 import os
 import re
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -26,12 +27,12 @@ from typing import Optional
 
 CONFIG = {
     "agent_name": "My Liar's Dice Agent",
-    "model": "gemini-2.0-flash",
+    "model": "gemini-2.5-flash-lite",
     "max_output_tokens": 1000,
     "version": "1.0.0",
 }
 
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 # ============================================================
 # SYSTEM PROMPT — edit this to change your agent's strategy
@@ -173,15 +174,11 @@ def parse_action(text: str) -> Action:
 # ============================================================
 
 def decide_action(state: GameState) -> Action:
-    model = genai.GenerativeModel(
-        model_name=CONFIG["model"],
-        system_instruction=SYSTEM_PROMPT,
-    )
-
-    chat = model.start_chat(enable_automatic_function_calling=True)
-    response = chat.send_message(
-        state.model_dump_json(),
-        generation_config=genai.GenerationConfig(
+    response = client.models.generate_content(
+        model=CONFIG["model"],
+        contents=state.model_dump_json(),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
             max_output_tokens=CONFIG["max_output_tokens"],
         ),
     )
