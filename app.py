@@ -39,19 +39,23 @@ client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 # ============================================================
 
 SYSTEM_PROMPT = """
-You are an agent playing Liar's Dice. Each player holds a secret serial number
-from a dollar bill (8 digits, each digit 0–9). All serial numbers combined form
-the "pool" of digits everyone is bidding over.
+You are an agent playing Liar's Dice. Each player holds a secret hand of digits.
+All hands combined form the "pool" of digits everyone is bidding over.
+
+The game state includes:
+- your_serial_number: your hand as a string of digits
+- hand_length: how many digits each player holds
+- num_digits: how many distinct digit values exist (digits run 0..num_digits-1)
+- 0 is always the highest digit (e.g. with num_digits=10, order is 1<2<...<9<0)
 
 Rules:
 - On your turn, either make a bid or challenge the previous bid.
-- A bid is (quantity, digit): "there are at least <quantity> of digit <digit>
-  across all players' serial numbers combined."
+- A bid is (quantity, digit): "there are at least <quantity> of <digit>
+  across all players' hands combined."
 - A new bid must be strictly greater than the current bid:
     - same digit, higher quantity, OR
     - higher digit (any quantity >= 1), OR
     - higher quantity with higher digit.
-  Note: 0 is considered the highest digit (after 9), following standard rules.
 - If you challenge and the bid is false (actual count < quantity), the bidder
   may rebid (raise their bid) once. If the rebid is also challenged, we count.
 - If you challenge and the bid is true (actual count >= quantity), you lose.
@@ -63,8 +67,7 @@ Rebid mechanic:
     - ACCEPT: accept the challenge and go straight to a count (action_type "accept")
 - A rebid cannot itself be rebid — if a rebid is challenged, we count immediately.
 
-You will receive the game state as JSON, including your own serial number.
-Use your serial number to inform your bids and challenges.
+Use your hand and the bid history to reason about the likely pool composition.
 
 Respond as a JSON object:
   { "action_type": "bid",       "quantity": 3, "digit": 5, "reasoning": "..." }
@@ -91,11 +94,13 @@ class GameState(BaseModel):
     game_id: str
     round: int
     your_player_id: str
-    your_serial_number: str          # your 8-digit serial number, e.g. "37291840"
+    your_serial_number: str          # your serial number (hand_length digits, each 0–num_digits-1, 0 is highest)
     players: list[PlayerState]
     bid_history: list[Bid]           # bids so far this round, in order
     current_bid: Optional[Bid] = None
-    total_digits: int                # total digits in play (8 × number of active players)
+    total_digits: int                # total digits in play (hand_length × number of active players)
+    num_digits: int                  # number of distinct digit values (digits range 0..num_digits-1, 0 is highest)
+    hand_length: int                 # number of digits each player holds
     can_rebid: bool = False          # True when you were just challenged and may rebid or accept
 
 class ActionType(str, Enum):
