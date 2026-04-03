@@ -17,6 +17,7 @@ from enum import Enum
 from google import genai
 from google.genai import types
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
@@ -141,6 +142,13 @@ def decide_action(state: GameState) -> Action:
 # ============================================================
 
 app = FastAPI(redirect_slashes=False)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/action", response_model=ActionResponse)
 async def action(state: GameState):
